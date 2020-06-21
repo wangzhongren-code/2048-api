@@ -1,13 +1,9 @@
 import numpy as np
-import xlwt
-import xlrd
-from xlutils.copy import copy
 import torch
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
 import pandas
-from train import SimpleNet
 
 class Agent:
     '''Agent Base.'''
@@ -16,30 +12,15 @@ class Agent:
         self.game = game
         self.display = display
 
-    def play(self, max_iter=np.inf, verbose=False,currentsht=70,url='/home/dl/机器学习大作业/test.xls'):
+    def play(self, max_iter=np.inf, verbose=False,currentsht=70):
         n_iter = 0
         while (n_iter < max_iter) and (not self.game.end):
             
             direction = self.step()
             self.game.move(direction)
-            
-            #print(self.game.board)
-            
-            tmp1 = self.game.board.reshape(1,16)
-            #print(tmp1)
-            #test1 = xlrd.open_workbook(url)
-            #test2 = copy(test1)
-            #sht = test2.get_sheet((currentsht))
-            df = pandas.DataFrame(list(tmp1))
-            df.to_csv('/home/dl/机器学习大作业/test4.xls',index=0,mode='a')
-            #for i in range(0,16):
-              #  sht.write(n_iter,i,tmp1[0,i])
-            
-            #sht.write(n_iter,16,direction)
+    
             n_iter += 1
-            #test2.save(url)
-            
-            
+
             if verbose:
                 print("Iter: {}".format(n_iter))
                 print("======Direction: {}======".format(
@@ -79,25 +60,37 @@ class ExpectiMaxAgent(Agent):
         return direction
 
 class YourOwnAgent(Agent):
+    def __init__(self, game, display=None):
+        self.game = game
+        self.display = display
     def step(self):
-        #model = SimpleNet()
-        model = torch.load('/home/dl/机器学习大作业/model.xls')
-        model.load_state_dict(torch.load('/home/dl/机器学习大作业/model2.xls'))
+        model = torch.load('model.xls')
         model.eval()
-        #print(model.state_dict())
         tmpboard = self.game.board.reshape(1,16)
-
+        #get the board 
         tmpboard = torch.tensor(tmpboard, dtype=torch.float)
         for i in range (16):
             if tmpboard[0,i]!=0:
                 tmpboard[0,i] = np.log2(tmpboard[0,i])
             else:
                 tmpboard[0,i] = 0
-        print(tmpboard)
-        tmpboard = tmpboard.reshape((1,1,4,4))
-        output = model(tmpboard)
-        tmp = 0
 
+        
+        tdata = np.zeros((12,4,4))
+
+        for i in range(16):
+            row1 = i/4
+            col1 = i%4
+            tdata[int(tmpboard[0,i]),int(row1),int(col1)]= 1
+            
+        tdata = tdata.reshape((1,12,4,4))
+
+        tdata = torch.from_numpy(tdata)
+        tdata = torch.tensor(tdata, dtype=torch.float32)
+        tdata = tdata.cuda()
+        output = model(tdata)
+        tmp = 0
+        #get the direction
         for i in range(0,4):
             if output[0,i].item()>output[0,tmp].item():
                 tmp = i
@@ -105,73 +98,54 @@ class YourOwnAgent(Agent):
         direction = tmp
         return direction
     
-    
-    
 class SimpleNet(nn.Module):
     def __init__(self):
         super(SimpleNet, self).__init__()
-        
-        self.conv1 = nn.Sequential(nn.Conv2d(1, 64, 3, 1, 1), nn.ReLU(),nn.MaxPool2d(2, 2))
-        self.conv2 = nn.Sequential(nn.Conv2d(64, 128, 2,1,1), nn.ReLU())
+        self.conv1 = nn.Sequential(nn.Conv2d(12, 128, 3,1), nn.ReLU())
+        self.conv2 = nn.Sequential(nn.Conv2d(12, 128, 2,1), nn.ReLU())
+        self.conv3 = nn.Sequential(nn.Conv2d(12, 128, 4,1), nn.ReLU())
+        self.conv4 = nn.Sequential(nn.Conv2d(12, 128, (4,1), 1), nn.ReLU())
+        self.conv5 = nn.Sequential(nn.Conv2d(12, 128, (1,4), 1), nn.ReLU())
         
         self.fc1 = nn.Sequential(
-            nn.Linear(3*3*128, 256),
-            nn.BatchNorm1d(256),
+            nn.Linear(2*2*128+9*128+1*128+8*128, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(),
-        )
-        self.fc2 = nn.Sequential(
-            nn.Linear(256, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            #nn.Linear(12,4)
         )
         self.fc3 = nn.Sequential(
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(1024, 256),
+            nn.BatchNorm1d(256),
             nn.ReLU(),
-            #nn.Linear(12,4)
         )
         self.fc4 = nn.Sequential(
-            nn.Linear(128, 96),
-            nn.BatchNorm1d(96),
+            nn.Linear(256, 4),
+            nn.BatchNorm1d(4),
             nn.ReLU(),
-            #nn.Linear(16,4)
-        )        
-        self.fc5 = nn.Sequential(
-            nn.Linear(96, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            #nn.Linear(16,4)
-        )  
-        self.fc6 = nn.Sequential(
-            nn.Linear(64, 16),
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
-            nn.Linear(16,4)
-        ) 
-        
-        self.dropout = nn.Dropout(0.08)      #使用dropout来防止过拟合
+        )    
+
+        self.dropout = nn.Dropout(0.23)      #使用dropout来防止过拟合
     
     def forward(self,x):
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = x.view(x.size()[0], -1)
+        x1 = self.conv1(x)
+        x2 = self.conv2(x)
+        x3 = self.conv3(x)
+        x4 = self.conv4(x)
+        x5 = self.conv5(x)
+
+        x1 = x1.view(x1.size()[0], -1)
+        x2 = x2.view(x2.size()[0], -1)
+        x3 = x3.view(x3.size()[0], -1)
+        x4 = x4.view(x4.size()[0], -1)
+        x5 = x5.view(x5.size()[0], -1)
+
+        x = torch.cat((x1,x2,x3,x4,x5),1)
         
         x = self.fc1(x)
-        x = self.dropout(x)
-        x = self.fc2(x)
         x = self.dropout(x)
         x = self.fc3(x)
         x = self.dropout(x)
         x = self.fc4(x)
         x = self.dropout(x)
-        
-        x = self.fc5(x)
-        x = self.dropout(x)    
-        
-        x = self.fc6(x)
-        x = self.dropout(x)
+
         x = F.softmax(x)
-        return x        
-        
-        
+        return x               

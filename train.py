@@ -66,7 +66,6 @@ class SimpleNet(nn.Module):
         x = F.softmax(x)
         return x            
     
-    
 def single_run(size, score_to_win, AgentClass, **kwargs):
     game = Game(size, score_to_win)
     agent = AgentClass(game, display=None, **kwargs)
